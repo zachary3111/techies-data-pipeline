@@ -26,6 +26,8 @@ export const EXPECTED_HEADERS = [
   'Lead Statement',
   'Timestamp',
   'Company Name',
+  'Industry Type',
+  'Email',
   'Phone Number',
   'Address 1 (Road/Street/Lane/Park/Industrial Estate)',
   'Address 2 (Village/Town/City)',
@@ -108,10 +110,10 @@ export function toCanonical(source, row) {
   const location = [town, county].filter(Boolean).join(', ') || null;
 
   const source_record_id = sourceRecordId(source, row, norm_permalink);
-  // Single canonical identity used for set-based dedup. Prefer the normalized
-  // permalink (present on ~all rows and consistent across sources), then post_id,
-  // then phone, then the synthesized per-source id.
-  const dedup_key = norm_permalink || post_id || norm_phone || `rid:${source_record_id}`;
+  // Cross-source identity is deliberately phone-only. Facebook permalinks and
+  // post IDs identify posts, not businesses, so the same phone across different
+  // posts must converge. Rows without a usable UK phone remain unique.
+  const dedup_key = norm_phone ? `phone:${norm_phone}` : `rid:${source_record_id}`;
 
   return {
     source,
@@ -124,6 +126,7 @@ export function toCanonical(source, row) {
     post_timestamp: toIso(get(lookup, 'posting_date')),
     scrape_timestamp: toIso(get(lookup, 'timestamp')),
     business_name: get(lookup, 'business_name'),
+    industry: get(lookup, 'industry'),
     phone: get(lookup, 'phone') || get(lookup, 'phone2'),
     phone2: get(lookup, 'phone2'),
     email: cleanEmail(get(lookup, 'email')),
@@ -150,7 +153,7 @@ export function toLeadRow(master, mergedPayload = {}) {
     'Company Name': master.business_name || get(lookup, 'business_name') || '',
     'Phone Number': master.phone || '',
     'Phone 2': master.phone2 || get(lookup, 'phone2') || '',
-    'Industry Type': get(lookup, 'industry') || '',
+    'Industry Type': master.industry || get(lookup, 'industry') || '',
     'Address 1 (Road/Street/Lane/Park/Industrial Estate)': master.address1 || get(lookup, 'address1') || '',
     'Address 2 (Village/Town/City)': get(lookup, 'town') || master.location || '',
     'County': get(lookup, 'county') || '',
