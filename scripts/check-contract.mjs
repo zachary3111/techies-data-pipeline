@@ -46,6 +46,9 @@ ok('same canonical keys/shape', JSON.stringify(Object.keys(a1).sort()) === JSON.
 ok('same normalized permalink', a1.norm_permalink && a1.norm_permalink === a2.norm_permalink);
 ok('same post_id', a1.post_id === '1000000000000001' && a2.post_id === '1000000000000001');
 ok('same normalized phone', a1.norm_phone === '+441234567890' && a2.norm_phone === '+441234567890');
+ok('phone is the cross-source dedup identity', a1.dedup_key === 'phone:+441234567890' && a1.dedup_key === a2.dedup_key);
+const samePhoneOtherPost = toCanonical('MFULL', { ...A_MFULL, 'Lead Proof URL': 'https://www.facebook.com/other/posts/9999999999999999' });
+ok('same phone on a different post still deduplicates', samePhoneOtherPost.dedup_key === a1.dedup_key);
 ok('same business fingerprint identity', businessKey(a1.business_name) === businessKey(a2.business_name));
 ok('per-source id differs (source prefix)', a1.source_record_id !== a2.source_record_id);
 ok('MFULL has post_timestamp, NFULL does not', a2.post_timestamp !== null && a1.post_timestamp === null);
@@ -77,6 +80,7 @@ ok('business_name mapped despite trailing spaces', mc.business_name === 'ABC Caf
 ok('phone mapped from "Primary Contact"', mc.norm_phone === '+441234567890');
 ok('postcode mapped from "Postal Code"', mc.postcode === 'CH41 5LH');
 ok('message mapped from "Business Note"', mc.message === 'Grand opening!');
+ok('industry retained from MFULL', mc.industry === 'Hospitality');
 ok('proof URL mapped from "Lead Proof URL " (trailing space)', !!mc.norm_permalink);
 ok('email "." treated as null', mc.email === null);
 ok('MFULL-real converges with NFULL A on permalink', mc.norm_permalink === a1.norm_permalink);

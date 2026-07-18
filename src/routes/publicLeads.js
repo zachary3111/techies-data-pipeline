@@ -21,6 +21,7 @@ function toDisplayRow(row) {
     message: row.message,
     scrape_timestamp: row.scrape_timestamp,
     business_name: row.business_name,
+    industry: row.industry,
     phone: row.phone,
     phone2: row.phone2,
     postcode: row.postcode,
@@ -106,7 +107,7 @@ publicRouter.get('/leads', async (req, res) => {
              m.created_at,
              m.status,
              m.possible_duplicate_of,
-             m.message, m.scrape_timestamp, m.business_name, m.phone, m.phone2,
+             m.message, m.scrape_timestamp, m.business_name, m.industry, m.phone, m.phone2,
              m.postcode, m.address1, m.location, m.url, m.post_timestamp, m.email,
              array_agg(DISTINCT ls.source::text) AS sources,
              EXISTS (SELECT 1 FROM exports e WHERE e.master_lead_id = m.id) AS exported

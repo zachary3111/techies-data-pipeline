@@ -20,7 +20,7 @@ function cutoverAt() {
 
 const STG_COLS = [
   'source', 'source_record_id', 'dedup_key', 'post_id', 'url', 'owner_name', 'message',
-  'post_timestamp', 'scrape_timestamp', 'business_name', 'phone', 'phone2', 'email',
+  'post_timestamp', 'scrape_timestamp', 'business_name', 'industry', 'phone', 'phone2', 'email',
   'postcode', 'address1', 'location', 'norm_permalink', 'norm_phone', 'fingerprint', 'raw_payload'
 ];
 
@@ -38,6 +38,7 @@ async function ingestChunk(client, runId, canonicals) {
     c.post_timestamp.push(x.post_timestamp);
     c.scrape_timestamp.push(x.scrape_timestamp);
     c.business_name.push(x.business_name);
+    c.industry.push(x.industry);
     c.phone.push(x.phone);
     c.phone2.push(x.phone2);
     c.email.push(x.email);
@@ -54,8 +55,8 @@ async function ingestChunk(client, runId, canonicals) {
     CREATE TEMP TABLE stg (
       source lead_source_name, source_record_id text, dedup_key text, post_id text,
       url text, owner_name text, message text, post_timestamp timestamptz,
-      scrape_timestamp timestamptz, business_name text, phone text, phone2 text,
-      email text, postcode text, address1 text, location text, norm_permalink text,
+      scrape_timestamp timestamptz, business_name text, industry text, phone text,
+      phone2 text, email text, postcode text, address1 text, location text, norm_permalink text,
       norm_phone text, fingerprint text, raw_payload jsonb
     ) ON COMMIT DROP`);
 
@@ -64,7 +65,7 @@ async function ingestChunk(client, runId, canonicals) {
        $1::lead_source_name[], $2::text[], $3::text[], $4::text[], $5::text[],
        $6::text[], $7::text[], $8::timestamptz[], $9::timestamptz[], $10::text[],
        $11::text[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[],
-       $17::text[], $18::text[], $19::text[], $20::jsonb[])`,
+       $17::text[], $18::text[], $19::text[], $20::text[], $21::jsonb[])`,
     STG_COLS.map((k) => c[k])
   );
 
@@ -73,27 +74,84 @@ async function ingestChunk(client, runId, canonicals) {
     `INSERT INTO raw_leads (source, source_record_id, raw_payload, pipeline_run_id)
      SELECT DISTINCT ON (source, source_record_id) source, source_record_id, raw_payload, $1
        FROM stg ORDER BY source, source_record_id
-     ON CONFLICT (source, source_record_id) DO UPDATE SET received_at = now(), pipeline_run_id = EXCLUDED.pipeline_run_id
+     ON CONFLICT (source, source_record_id) DO UPDATE SET
+       raw_payload = EXCLUDED.raw_payload,
+       received_at = now(),
+       pipeline_run_id = EXCLUDED.pipeline_run_id
      RETURNING (xmax = 0) AS inserted`,
     [runId]
   );
   const rawInserted = rawRes.rows.filter((r) => r.inserted).length;
   const rawUpdated = rawRes.rows.length - rawInserted;
 
-  // 2. master_leads: one per dedup_key. New keys only (ON CONFLICT DO NOTHING).
+  // Compatibility during cutover: an existing pre-phone-key master may still
+  // use its old permalink key. Reuse the NFULL-first existing master for that
+  // phone so re-ingestion enriches it instead of creating another record.
+  await client.query(`
+    UPDATE stg s
+       SET dedup_key = (
+         SELECT m.dedup_key
+           FROM master_leads m
+          WHERE m.norm_phone = s.norm_phone
+          ORDER BY
+            EXISTS (
+              SELECT 1 FROM lead_sources ls
+               WHERE ls.master_lead_id = m.id AND ls.source = 'NFULL'
+            ) DESC,
+            m.id
+          LIMIT 1
+       )
+     WHERE s.norm_phone IS NOT NULL
+       AND EXISTS (SELECT 1 FROM master_leads m WHERE m.norm_phone = s.norm_phone)`);
+
+  // 2. master_leads: one per phone identity. NFULL is selected first when a
+  // mixed batch contains both sources.
   const masterRes = await client.query(
     `INSERT INTO master_leads
        (dedup_key, post_id, url, owner_name, message, post_timestamp, scrape_timestamp,
-        business_name, phone, phone2, email, postcode, address1, location, norm_permalink, norm_phone, fingerprint, status)
+        business_name, industry, phone, phone2, email, postcode, address1, location, norm_permalink, norm_phone, fingerprint, status)
      SELECT DISTINCT ON (dedup_key)
         dedup_key, post_id, url, owner_name, message, post_timestamp, scrape_timestamp,
-        business_name, phone, phone2, email, postcode, address1, location, norm_permalink, norm_phone, fingerprint, 'INGESTED'
-       FROM stg ORDER BY dedup_key
+        business_name, industry, phone, phone2, email, postcode, address1, location, norm_permalink, norm_phone, fingerprint, 'INGESTED'
+       FROM stg
+      ORDER BY dedup_key, CASE WHEN source = 'NFULL' THEN 0 ELSE 1 END
      ON CONFLICT (dedup_key) DO NOTHING
      RETURNING id`
   );
   const newMasterIds = masterRes.rows.map((r) => r.id);
   const inserted = newMasterIds.length;
+
+  // Re-ingestion updates masters. NFULL owns conflicting values; MFULL may
+  // update MFULL-only masters and fill blanks on NFULL-owned masters.
+  await client.query(`
+    WITH preferred AS (
+      SELECT DISTINCT ON (dedup_key)
+        dedup_key, source, post_id, url, owner_name, message, post_timestamp,
+        scrape_timestamp, business_name, industry, phone, phone2, email, postcode,
+        address1, location, norm_permalink, norm_phone, fingerprint
+      FROM stg
+      ORDER BY dedup_key, CASE WHEN source = 'NFULL' THEN 0 ELSE 1 END
+    )
+    UPDATE master_leads m SET
+      post_id = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.post_id,m.post_id) ELSE coalesce(m.post_id,p.post_id) END,
+      url = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.url,m.url) ELSE coalesce(m.url,p.url) END,
+      owner_name = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.owner_name,m.owner_name) ELSE coalesce(m.owner_name,p.owner_name) END,
+      message = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.message,m.message) ELSE coalesce(m.message,p.message) END,
+      post_timestamp = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.post_timestamp,m.post_timestamp) ELSE coalesce(m.post_timestamp,p.post_timestamp) END,
+      scrape_timestamp = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.scrape_timestamp,m.scrape_timestamp) ELSE coalesce(m.scrape_timestamp,p.scrape_timestamp) END,
+      business_name = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.business_name,m.business_name) ELSE coalesce(m.business_name,p.business_name) END,
+      industry = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.industry,m.industry) ELSE coalesce(m.industry,p.industry) END,
+      phone = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.phone,m.phone) ELSE coalesce(m.phone,p.phone) END,
+      phone2 = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.phone2,m.phone2) ELSE coalesce(m.phone2,p.phone2) END,
+      email = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.email,m.email) ELSE coalesce(m.email,p.email) END,
+      postcode = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.postcode,m.postcode) ELSE coalesce(m.postcode,p.postcode) END,
+      address1 = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.address1,m.address1) ELSE coalesce(m.address1,p.address1) END,
+      location = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.location,m.location) ELSE coalesce(m.location,p.location) END,
+      norm_permalink = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.norm_permalink,m.norm_permalink) ELSE coalesce(m.norm_permalink,p.norm_permalink) END,
+      norm_phone = coalesce(p.norm_phone,m.norm_phone),
+      fingerprint = CASE WHEN p.source = 'NFULL' OR NOT EXISTS (SELECT 1 FROM lead_sources ls WHERE ls.master_lead_id=m.id AND ls.source='NFULL') THEN coalesce(p.fingerprint,m.fingerprint) ELSE coalesce(m.fingerprint,p.fingerprint) END
+    FROM preferred p
+    WHERE m.dedup_key = p.dedup_key`);
 
   // 3. link raw_leads -> master via dedup_key.
   await client.query(
