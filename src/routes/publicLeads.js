@@ -115,7 +115,8 @@ publicRouter.get('/leads', async (req, res) => {
        WHERE ${whereSql}
        GROUP BY m.id
        ${havingSql}
-       ORDER BY m.created_at DESC, m.id DESC
+       -- Match the displayed "Timestamp" column and return oldest leads first.
+       ORDER BY m.scrape_timestamp ASC NULLS LAST, m.id ASC
        LIMIT ${limit} OFFSET ${effOffset}`;
     const dataRes = await pool.query(dataSql, params);
 
