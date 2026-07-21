@@ -1,10 +1,10 @@
-# Render Blueprint â€” $0 free-tier deployment.
+# Render Blueprint — $0 free-tier deployment.
 # DB is Supabase free Postgres (DATABASE_URL set below). Compute is a single free
 # web service. There is NO always-on worker or Render cron: ingestion + batched
 # validation run via POST /internal/tick, triggered by a free external scheduler
 # (see .github/workflows/pipeline-tick.yml).
 #
-# Migrations: free plan has no preDeployCommand â€” run `npm run migrate` once from
+# Migrations: free plan has no preDeployCommand — run `npm run migrate` once from
 # your machine against the Supabase DATABASE_URL (and again after schema changes).
 services:
   - type: web
@@ -17,11 +17,11 @@ services:
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
-        sync: false # Supabase pooled connection string (postgres://â€¦:6543/â€¦?pgbouncer=true)
+        sync: false # Supabase pooled connection string (postgres://…:6543/…?pgbouncer=true)
       - key: PIPELINE_API_TOKEN
-        generateValue: true # bearer for /internal/* â€” also a GitHub Actions secret
+        generateValue: true # bearer for /internal/* — also a GitHub Actions secret
       - key: PUBLIC_API_KEY
-        generateValue: true # x-api-key for /api/* â€” copy into both frontend Vercel projects
+        generateValue: true # x-api-key for /api/* — copy into both frontend Vercel projects
       - key: ALLOWED_ORIGINS
         sync: false # comma-separated frontend origins
       - key: PIPELINE_CUTOVER_AT
