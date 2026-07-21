@@ -17,7 +17,7 @@ let passed = 0;
 function ok(name, cond) {
   assert.ok(cond, `FAILED: ${name}`);
   passed += 1;
-  console.log(`  âœ“ ${name}`);
+  console.log(`  ✓ ${name}`);
 }
 
 console.log('fburl.normalizePermalink');
@@ -40,8 +40,8 @@ ok('mobile 07123 456789 -> +447123456789', normalizeUkPhone('07123 456789') === 
 ok('junk -> null', normalizeUkPhone('N/A') === null);
 ok('too short -> null', normalizeUkPhone('12345') === null);
 
-console.log('fingerprint (cafÃ© vs Cafe Ltd)');
-ok('ABC CafÃ© == ABC Cafe Ltd', businessKey('ABC CafÃ©') === businessKey('ABC Cafe Ltd'));
+console.log('fingerprint (café vs Cafe Ltd)');
+ok('ABC Café == ABC Cafe Ltd', businessKey('ABC Café') === businessKey('ABC Cafe Ltd'));
 
 console.log('canonical: same real-world lead from NFULL and MFULL converges');
 const a1 = toCanonical('NFULL', A_NFULL);
@@ -134,16 +134,16 @@ ok('merge: MFULL-only rows kept (C, D)', m1.counts.mfull_only === 2);
 ok('merge: total = all NFULL + MFULL-only',
   m1.counts.merged_total === 5 && m1.counts.merged_total === m1.counts.nfull + m1.counts.mfull_only);
 
-// NFULL is never deduped against itself â€” identical NFULL rows both survive.
+// NFULL is never deduped against itself — identical NFULL rows both survive.
 const m2 = mergeAsymmetric([cA_N, cA_N], []);
 ok('merge: NFULL internal duplicate is NOT deduped', m2.counts.merged_total === 2);
 
-// No MFULL self-dedup â€” duplicate MFULL-only rows both survive.
+// No MFULL self-dedup — duplicate MFULL-only rows both survive.
 const m3 = mergeAsymmetric([], [cC_M, cC_M]);
 ok('merge: MFULL-only internal duplicate kept (no MFULL self-dedup)',
   m3.counts.mfull_only === 2 && m3.counts.merged_total === 2);
 
-// A keyless MFULL row can't "exist in NFULL" â†’ always kept.
+// A keyless MFULL row can't "exist in NFULL" → always kept.
 const m4 = mergeAsymmetric([cA_N], [toCanonical('MFULL', { 'Company Name': 'Ghost Ltd' })]);
 ok('merge: keyless MFULL row always kept', m4.counts.mfull_only === 1);
 
@@ -169,5 +169,5 @@ ok('validation reasons retain commas without creating columns',
   outputRows[0].validation_reasons === 'Strong opening signal | Phone, address present');
 ok('one physical line per output lead', outputCsv.split('\n').length === 2);
 
-console.log(`\nPhase 1 contract: ${passed} checks passed âœ…`);
+console.log(`\nPhase 1 contract: ${passed} checks passed ✅`);
 
