@@ -1,4 +1,4 @@
-// Public read API â€” doc section 7's "one endpoint" the frontends read from.
+// Public read API — doc section 7's "one endpoint" the frontends read from.
 // X-API-Key authed (used server-side by each frontend's proxy). Returns rows
 // shaped with the 9 display columns both apps already render, plus source and
 // the latest validation result. This is the final NFULL -> validator -> output
@@ -214,7 +214,7 @@ publicRouter.get('/stats', async (_req, res) => {
       rejected_before_ai: Number(v.rejected_before_ai),
       ai_calls: Number(v.ai_calls),
       avg_validation_seconds: v.avg_validation_seconds != null ? Number(v.avg_validation_seconds) : null,
-      // cost per approved lead â€” the doc's key figure. Null until the validator
+      // cost per approved lead — the doc's key figure. Null until the validator
       // reports token usage (it currently does not expose it to the pipeline).
       total_ai_cost_usd: totalCost,
       cost_per_approved_lead: approved > 0 && totalCost > 0 ? totalCost / approved : null
