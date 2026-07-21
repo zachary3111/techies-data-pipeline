@@ -1,11 +1,13 @@
-// Public read API — doc section 7's "one endpoint" the frontends read from.
+// Public read API â€” doc section 7's "one endpoint" the frontends read from.
 // X-API-Key authed (used server-side by each frontend's proxy). Returns rows
-// shaped with the 9 display columns both apps already render, plus a source
-// badge. In M1 there is no validation status yet; M2 adds the status filter.
+// shaped with the 9 display columns both apps already render, plus source and
+// the latest validation result. This is the final NFULL -> validator -> output
+// contract consumed by the validator frontend.
 import express from 'express';
 import { requireApiKey } from '../lib/auth.js';
 import { pool } from '../db/pool.js';
 import { EXPECTED_HEADERS, toLeadRow } from '../lib/canonical.js';
+import { toCsv } from '../lib/output.js';
 
 export const publicRouter = express.Router();
 
@@ -37,6 +39,13 @@ function toDisplayRow(row) {
   merged.source = uniqueSources.length === 2 ? 'BOTH' : uniqueSources[0];
   merged.master_id = row.master_id;
   merged.validation_status = row.status;
+  merged.validation_score = row.validation_score;
+  merged.validation_confidence_pct = row.validation_confidence == null
+    ? null
+    : Math.round(Number(row.validation_confidence) * 100);
+  merged.validation_reasons = row.validation_reasons || [];
+  merged.validation_layer = row.validation_layer;
+  merged.validated_at = row.validated_at;
   merged.exported = row.exported;
   merged.possible_duplicate_of = row.possible_duplicate_of;
   return merged;
@@ -109,11 +118,23 @@ publicRouter.get('/leads', async (req, res) => {
              m.message, m.scrape_timestamp, m.business_name, m.phone, m.phone2,
              m.postcode, m.address1, m.location, m.url, m.post_timestamp, m.email,
              array_agg(DISTINCT ls.source::text) AS sources,
-             EXISTS (SELECT 1 FROM exports e WHERE e.master_lead_id = m.id) AS exported
+             EXISTS (SELECT 1 FROM exports e WHERE e.master_lead_id = m.id) AS exported,
+             vr.score AS validation_score,
+             vr.confidence AS validation_confidence,
+             vr.reasons AS validation_reasons,
+             vr.layer AS validation_layer,
+             vr.validated_at
         FROM master_leads m
         JOIN lead_sources ls ON ls.master_lead_id = m.id
+        LEFT JOIN LATERAL (
+          SELECT score, confidence, reasons, layer, validated_at
+            FROM validation_results
+           WHERE master_lead_id = m.id
+           ORDER BY validated_at DESC, id DESC
+           LIMIT 1
+        ) vr ON true
        WHERE ${whereSql}
-       GROUP BY m.id
+       GROUP BY m.id, vr.score, vr.confidence, vr.reasons, vr.layer, vr.validated_at
        ${havingSql}
        ORDER BY m.created_at DESC, m.id DESC
        LIMIT ${limit} OFFSET ${effOffset}`;
@@ -193,7 +214,7 @@ publicRouter.get('/stats', async (_req, res) => {
       rejected_before_ai: Number(v.rejected_before_ai),
       ai_calls: Number(v.ai_calls),
       avg_validation_seconds: v.avg_validation_seconds != null ? Number(v.avg_validation_seconds) : null,
-      // cost per approved lead — the doc's key figure. Null until the validator
+      // cost per approved lead â€” the doc's key figure. Null until the validator
       // reports token usage (it currently does not expose it to the pipeline).
       total_ai_cost_usd: totalCost,
       cost_per_approved_lead: approved > 0 && totalCost > 0 ? totalCost / approved : null
@@ -244,19 +265,4 @@ publicRouter.post('/exports', async (req, res) => {
   }
 });
 
-// Minimal CSV serializer for the display rows (mirrors the old CSV shape).
-function toCsv(leads) {
-  const headers = [...EXPECTED_HEADERS, 'source'];
-  const esc = (v) => {
-    // Collapse embedded newlines so every record is ONE physical line — the
-    // frontends' line-based CSV parser breaks on multi-line quoted fields.
-    let s = v === null || v === undefined ? '' : String(v);
-    s = s.replace(/[\r\n]+/g, ' ').trim();
-    return /[",]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const lines = [headers.join(',')];
-  for (const lead of leads) {
-    lines.push(headers.map((h) => esc(lead[h])).join(','));
-  }
-  return lines.join('\n');
-}
+
