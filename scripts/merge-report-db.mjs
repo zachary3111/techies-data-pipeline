@@ -35,6 +35,7 @@ console.log('=== Asymmetric NFULL-base merge (from DB raw_leads) ===');
 console.log(`NFULL rows (all kept):          ${counts.nfull}`);
 console.log(`MFULL rows (total):             ${counts.mfull_total}`);
 console.log(`  MFULL omitted (in NFULL):     ${counts.mfull_omitted}`);
+console.log(`  MFULL dup collapsed (phone):  ${counts.mfull_dup_collapsed}`);
 console.log(`  MFULL-only (kept):            ${counts.mfull_only}`);
 console.log(`MERGED TOTAL:                   ${counts.merged_total}`);
 console.log(`  check: ${counts.nfull} + ${counts.mfull_only} = ${counts.nfull + counts.mfull_only}  ${okTotal ? '✓' : '✗ MISMATCH'}`);

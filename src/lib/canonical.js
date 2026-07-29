@@ -111,13 +111,20 @@ export function toCanonical(source, row) {
   const location = [town, county].filter(Boolean).join(', ') || null;
 
   const source_record_id = sourceRecordId(source, row);
-  // dedup_key is the PER-ROW master identity (== source_record_id): one master per
-  // distinct row, so nothing collapses within a source (asymmetric rule).
-  const dedup_key = source_record_id;
   // match_key is the cross-source "same lead" key: it drives dropping an MFULL row
   // that already exists in NFULL. Client rule: compare by normalized PHONE only
   // (unique per business). null ⇒ no phone ⇒ can't exist in NFULL ⇒ always kept.
   const match_key = norm_phone || null;
+  // dedup_key is the master identity (one master per distinct dedup_key):
+  //  - NFULL: PER-ROW (== source_record_id) so nothing collapses within NFULL —
+  //    we keep every NFULL row (asymmetric rule; never self-dedup).
+  //  - MFULL: dedup the same lead BY PHONE, so MFULL's rolling ~24h sheet (leads
+  //    re-scraped/re-listed with shifted cells) stores each lead once instead of
+  //    accumulating a new master per reappearance. Phone-less MFULL rows fall back
+  //    to the per-row hash (no phone ⇒ can't dedup by phone ⇒ stay distinct).
+  const dedup_key = source === 'MFULL'
+    ? (norm_phone || source_record_id)
+    : source_record_id;
 
   return {
     source,
