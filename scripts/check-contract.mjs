@@ -136,10 +136,10 @@ ok('merge: total = all NFULL + MFULL-only',
 const m2 = mergeAsymmetric([cA_N, cA_N], []);
 ok('merge: NFULL internal duplicate is NOT deduped', m2.counts.merged_total === 2);
 
-// No MFULL self-dedup — duplicate MFULL-only rows both survive.
+// MFULL self-dedup by phone — same-phone MFULL-only duplicates collapse to one.
 const m3 = mergeAsymmetric([], [cC_M, cC_M]);
-ok('merge: MFULL-only internal duplicate kept (no MFULL self-dedup)',
-  m3.counts.mfull_only === 2 && m3.counts.merged_total === 2);
+ok('merge: MFULL-only internal duplicate collapsed by phone',
+  m3.counts.mfull_only === 1 && m3.counts.merged_total === 1 && m3.counts.mfull_dup_collapsed === 1);
 
 // A keyless MFULL row can't "exist in NFULL" → always kept.
 const m4 = mergeAsymmetric([cA_N], [toCanonical('MFULL', { 'Company Name': 'Ghost Ltd' })]);
